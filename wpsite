@@ -1,0 +1,133 @@
+#!/bin/bash
+#
+# getopts-template.bash (use builtin getopts)
+#
+usage_exit() {
+  echo "Usage: wpsite [OPTION]..."
+  echo "Will build public directory on Apache, and database(MySQL) create for WordPress."
+  echo "See also"
+  echo "  wpsite -a hoge"
+  echo "  domain http://hoge.sylseed.jp/"
+  echo ""
+  echo "arguments to short options."
+  echo "  -a 'sub domain name'    add the site."
+  echo "  -d 'sub domain name'    remove the site."
+  echo "  -l                      list to site."
+  echo ""
+  exit 1
+}
+#
+# Options
+#
+while getopts ":a:d:lh" GETOPTS
+do
+  case $GETOPTS in
+  a) ADDSITE=$OPTARG
+     ;;
+  d) DELSITE=$OPTARG
+     ;;
+  l) LISTSITE=1
+     ;;
+  h) usage_exit
+     ;;
+  *) usage_exit
+     ;;
+  esac
+done
+#
+shift $((OPTIND - 1))
+#
+
+#
+# Define
+#
+DOMAIN=<domain>
+SITEDIR=/etc/apache2/sites-available
+DB_HOST=<host>
+DB_USER=<user>
+DB_PASS=<pass>
+
+function mka2dir {
+  BEFORE_CONFIG=<directory>
+  BEFORE_DB=<dbname>
+  BEFORE_USER=<dbuser>
+  BEFORE_PASS=<dbpass>
+  if [ -e /srv/public/${ADDSITE}.${DOMAIN} ]; then
+    echo "Warning: directory already exists. git clone skip. " /srv/public/${ADDSITE}.${DOMAIN}
+  else
+    sudo -u content git clone ssh://abu.seirei.name/var/git/kamiyama-office.com.git /srv/public/${ADDSITE}.${DOMAIN}
+    sudo -u content sed -e "s/${BEFORE_DB}\|${BEFORE_USER}\|${BEFORE_PASS}/${ADDSITE}/" $BEFORE_CONFIG > /srv/public/${ADDSITE}.${DOMAIN}/wp-config.php
+    chown content:content /srv/public/${ADDSITE}.${DOMAIN}/wp-config.php
+    chmod 600 /srv/public/${ADDSITE}.${DOMAIN}/wp-config.php
+  fi
+}
+
+function rma2dir {
+  rm -rf /srv/public/${DELSITE}.${DOMAIN}
+}
+
+function lsa2dir {
+  echo "Apache public directory list."
+  ls -l /srv/public | awk '{print $9}' | nl -w 3
+  echo ""
+}
+
+function cpa2site {
+  if [ -e $SITEDIR/$ADDSITE.$DOMAIN.http ]; then
+    echo "Warning: apache site file already exists. copy skip. " $SITEDIR/$ADDSITE.$DOMAIN.http
+  else
+    sed -e s/$DOMAIN/$ADDSITE.$DOMAIN/ $SITEDIR/$DOMAIN.http > $SITEDIR/$ADDSITE.$DOMAIN.http
+    /usr/sbin/a2ensite $ADDSITE.$DOMAIN.http > /dev/null
+    /etc/init.d/apache2 reload
+  fi
+}
+
+function rma2site {
+  /usr/sbin/a2dissite $DELSITE.$DOMAIN.http
+  rm -rf $SITEDIR/$DELSITE.$DOMAIN.http
+  /etc/init.d/apache2 reload
+}
+
+function lsa2site {
+  echo "Apache site setting file."
+  ls -l $SITEDIR | awk '{print $9}' | nl -w 3
+  echo ""
+}
+
+function createdb {
+  DB_CREATE="create database ${ADDSITE};"
+  USER_CREATE="GRANT ALL PRIVILEGES ON ${ADDSITE}.* TO ${ADDSITE}@'localhost' IDENTIFIED BY '${ADDSITE}' WITH GRANT OPTION;FLUSH PRIVILEGES;"
+  /usr/bin/mysql -h $DB_HOST -u $DB_USER -p$DB_PASS -e "$DB_CREATE"
+  /usr/bin/mysql -h $DB_HOST -u $DB_USER -p$DB_PASS -e "$USER_CREATE"
+}
+
+function dropdb {
+  DB_DROP="drop database ${DELSITE};"
+  USER_DELETE="delete from mysql.user where User='${DELSITE}';FLUSH PRIVILEGES;"
+  /usr/bin/mysql -h $DB_HOST -u $DB_USER -p$DB_PASS -e "$DB_DROP"
+  /usr/bin/mysql -h $DB_HOST -u $DB_USER -p$DB_PASS -e "$USER_DELETE"
+}
+
+function listdb {
+  DB_LIST="show databases;"
+  echo "Mysql database list."  
+  /usr/bin/mysql -h $DB_HOST -u $DB_USER -p$DB_PASS -e "$DB_LIST" | awk '{print $1}' | grep -v Database | grep -v schema | nl -w 3
+}
+
+if [ -n "$ADDSITE" ]; then
+  mka2dir
+  cpa2site
+  createdb
+fi
+
+if [ -n "$DELSITE" ]; then
+  rma2dir
+  rma2site
+  dropdb
+fi
+
+if [ -n "$LISTSITE" ]; then
+  lsa2dir
+  lsa2site
+  listdb
+fi
